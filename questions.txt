@@ -1,0 +1,21 @@
+(1) One normal kernel instance uses 402,653,184 bytes for its image pixel
+arrays: a 4096 x 4096 input image and a same-sized output image, at 12 bytes
+per pixel (three 32-bit channels).
+
+(2) With five normal kernel instances, each instance still uses 402,653,184
+bytes of image pixel data. The processes do not share their separately loaded
+input or output arrays, so their combined image-array footprint is
+2,013,265,920 bytes.
+
+(3) With normal reads, each process privately allocates the input image, so
+its USS and PSS are high. With mmap, the input pixel pages are shared, so USS
+and PSS per process decrease; RSS can still show the mapped pages in every
+process and therefore can overstate total physical use. The mmap plot often
+has an early rise as processes touch pages and then levels off. Execution time
+can improve because the kernel and page cache share the already-loaded input,
+although scheduling, page-cache warmness, and disk I/O can change the exact
+shape and duration.
+
+(4) A minor page fault is resolved without disk I/O, for example by mapping a
+page already resident in RAM or creating a demand-zero page. A major page
+fault requires I/O because the needed page must be read from backing storage.

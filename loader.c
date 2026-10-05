@@ -1,6 +1,8 @@
 #include "loader.h"
 #include <sys/mman.h>
 #include <errno.h>
+#include <sys/stat.h>
+#include <string.h>
 
 
 /*
@@ -27,7 +29,23 @@
  * Returns 0 on success, or -1 if the file cannot be opened or mapped.
  */
 int loadimage_mmap(char* filename, struct image* image) {
-	return 0;
+    if (filename == NULL || image == NULL) return -1;
+    int fd = open(filename, O_RDONLY);
+    if (fd == -1) return -1;
+    struct stat st;
+    if (fstat(fd, &st) == -1 || st.st_size < (off_t)sizeof(struct image)) { close(fd); return -1; }
+    void *mapping = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (mapping == MAP_FAILED) return -1;
+    struct image header;
+    memcpy(&header, mapping, sizeof(header));
+    if (header.width <= 0 || header.height <= 0 || (size_t)header.width > SIZE_MAX / (size_t)header.height || (size_t)header.width * (size_t)header.height > (SIZE_MAX - sizeof(struct image)) / sizeof(struct pixel)) { munmap(mapping, (size_t)st.st_size); return -1; }
+    size_t required = sizeof(struct image) + (size_t)header.width * (size_t)header.height * sizeof(struct pixel);
+    if ((uintmax_t)required > (uintmax_t)st.st_size) { munmap(mapping, (size_t)st.st_size); return -1; }
+    image->width = header.width;
+    image->height = header.height;
+    image->pixels = (struct pixel *)((char *)mapping + sizeof(struct image));
+    return 0;
 }
 
 /*
@@ -47,7 +65,19 @@ int loadimage_mmap(char* filename, struct image* image) {
  * A failed flush to disk is reported but still returns 0.
  */
 int saveimage_mmap(char* filename, struct image* image) {
-	return 0;
+    if (filename == NULL || image == NULL || image->pixels == NULL || image->width <= 0 || image->height <= 0 || (size_t)image->width > SIZE_MAX / (size_t)image->height || (size_t)image->width * (size_t)image->height > (SIZE_MAX - sizeof(struct image)) / sizeof(struct pixel)) return -1;
+    size_t length = sizeof(struct image) + (size_t)image->width * (size_t)image->height * sizeof(struct pixel);
+    int fd = open(filename, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if (fd == -1) return -1;
+    if (ftruncate(fd, (off_t)length) == -1) { close(fd); return -1; }
+    void *mapping = mmap(NULL, length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    if (mapping == MAP_FAILED) return -1;
+    memcpy(mapping, image, sizeof(*image));
+    memcpy((char *)mapping + sizeof(*image), image->pixels, length - sizeof(*image));
+    if (msync(mapping, length, MS_SYNC) == -1) perror("msync");
+    munmap(mapping, length);
+    return 0;
 }
 
 
